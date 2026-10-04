@@ -39,11 +39,11 @@
 
 ### Chat Models
 
-- Mistral Medium Latest.
+- Mistral Medium Latest
 
 ### Embedding Models
 
-- Mistral Embed.
+- Mistral Embed
 
 ## 🗃️ Vector Stores
 

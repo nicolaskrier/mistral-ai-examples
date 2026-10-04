@@ -84,7 +84,7 @@ class RagExample {
             var storedPopesCount = qdrantClient.countAsync(collectionName).get(1, SECONDS);
 
             if (storedPopesCount == 0L) {
-                LOGGER.info("Creating pontiff number key index for popes collection from vector store.");
+                LOGGER.info("Creating pontiff number index into popes collection.");
                 qdrantClient.createPayloadIndexAsync(collectionName, PONTIFF_NUMBER_KEY, Collections.PayloadSchemaType.Integer, null, null, null, null).get(1, SECONDS);
                 LOGGER.info("Loading documents corresponding to popes into vector store.");
                 var documents = documentReader.read();
