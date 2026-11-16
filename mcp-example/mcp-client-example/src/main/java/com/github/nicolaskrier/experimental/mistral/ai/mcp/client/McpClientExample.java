@@ -3,11 +3,12 @@ package com.github.nicolaskrier.experimental.mistral.ai.mcp.client;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.ai.session.SessionService;
+import org.springframework.ai.session.advisor.SessionAdvisors;
+import org.springframework.ai.session.compaction.TurnCountTrigger;
+import org.springframework.ai.session.compaction.WindowCompactionStrategy;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
@@ -16,8 +17,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.Resource;
 
-import java.io.IOException;
-import java.nio.charset.Charset;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
@@ -28,6 +27,8 @@ class McpClientExample {
     private static final Logger LOGGER = LoggerFactory.getLogger(McpClientExample.class);
 
     private static final String SEARCHED_POPE_KEY = "searched_pope";
+
+    private static final String SESSION_ID = UUID.randomUUID().toString();
 
     @Value("classpath:/prompts/system-prompt.txt")
     private Resource systemPromptResource;
@@ -45,10 +46,14 @@ class McpClientExample {
     private int previousSearchedPopesNumber;
 
     @Bean
-    ChatClient chatClient(ChatClient.Builder chatClientBuilder, ChatMemory chatMemory, ToolCallbackProvider toolCallbackProvider) {
+    ChatClient chatClient(ChatClient.Builder chatClientBuilder, SessionService sessionService, ToolCallbackProvider toolCallbackProvider) {
+        var sessionAdvisors = SessionAdvisors.builder(sessionService)
+                .compaction(new TurnCountTrigger(4), WindowCompactionStrategy.builder().lastTurns(2).build())
+                .build();
+
         return chatClientBuilder.defaultSystem(systemPromptResource)
-                .defaultAdvisors(advisorSpec -> advisorSpec.param(ChatMemory.CONVERSATION_ID, UUID.randomUUID()))
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build(), new SimpleLoggerAdvisor())
+                .defaultAdvisors(sessionAdvisors)
+                .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultTools(toolCallbackProvider)
                 .build();
     }
@@ -67,30 +72,23 @@ class McpClientExample {
                 .variables(Map.of(SEARCHED_POPE_KEY, searchedPope))
                 .build()
                 .create();
-        var pope = searchPope(prompt, chatClient);
+        var chatClientRequestSpec = chatClient.prompt(prompt);
+        var pope = searchPope(chatClientRequestSpec);
         LOGGER.info("The {} pope is: {}", searchedPope, pope);
     }
 
     private void searchPreviousPopes(ChatClient chatClient) {
         IntStream.range(0, previousSearchedPopesNumber).forEach(_ -> {
-            var prompt = createUserPrompt();
-            var pope = searchPope(prompt, chatClient);
+            var chatClientRequestSpec = chatClient.prompt().user(userPromptResource);
+            var pope = searchPope(chatClientRequestSpec);
             LOGGER.info("The previous pope is: {}", pope);
         });
     }
 
-    private static Pope searchPope(Prompt prompt, ChatClient chatClient) {
-        return chatClient.prompt(prompt)
+    private static Pope searchPope(ChatClient.ChatClientRequestSpec chatClientRequestSpec) {
+        return chatClientRequestSpec.advisors(SessionAdvisors.session(SESSION_ID))
                 .call()
-                .entity(Pope.class, ChatClient.EntityParamSpec::validateSchema);
-    }
-
-    private Prompt createUserPrompt() {
-        try {
-            return new Prompt(userPromptResource.getContentAsString(Charset.defaultCharset()));
-        } catch (IOException exception) {
-            throw new IllegalStateException("Unable to read user prompt!", exception);
-        }
+                .entity(Pope.class, entityParamSpec -> entityParamSpec.useProviderStructuredOutput().validateSchema());
     }
 
     static void main(String[] args) {

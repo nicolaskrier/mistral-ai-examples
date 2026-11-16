@@ -5,15 +5,16 @@ import io.qdrant.client.grpc.Collections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.DocumentReader;
 import org.springframework.ai.reader.JsonMetadataGenerator;
 import org.springframework.ai.reader.JsonReader;
+import org.springframework.ai.session.SessionService;
+import org.springframework.ai.session.advisor.SessionAdvisors;
+import org.springframework.ai.session.compaction.TurnCountTrigger;
+import org.springframework.ai.session.compaction.WindowCompactionStrategy;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
@@ -27,9 +28,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.Resource;
 
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.*;
+import java.util.Map;
+import java.util.UUID;
 import java.util.stream.IntStream;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -42,6 +42,8 @@ class RagExample {
     private static final String PONTIFF_NUMBER_KEY = "pontiffNumber";
 
     private static final String SEARCHED_POPE_PONTIFF_NUMBER_KEY = "searched_pope_pontiff_number";
+
+    private static final String SESSION_ID = UUID.randomUUID().toString();
 
     @Value("classpath:/prompts/system-prompt.txt")
     private Resource systemPromptResource;
@@ -97,10 +99,14 @@ class RagExample {
     }
 
     @Bean
-    ChatClient chatClient(ChatClient.Builder chatClientBuilder, ChatMemory chatMemory) {
+    ChatClient chatClient(ChatClient.Builder chatClientBuilder, SessionService sessionService) {
+        var sessionAdvisors = SessionAdvisors.builder(sessionService)
+                .compaction(new TurnCountTrigger(4), WindowCompactionStrategy.builder().lastTurns(2).build())
+                .build();
+
         return chatClientBuilder.defaultSystem(systemPromptResource)
-                .defaultAdvisors(advisorSpec -> advisorSpec.param(ChatMemory.CONVERSATION_ID, UUID.randomUUID()))
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build(), new SimpleLoggerAdvisor())
+                .defaultAdvisors(sessionAdvisors)
+                .defaultAdvisors(new SimpleLoggerAdvisor())
                 .build();
     }
 
@@ -119,25 +125,28 @@ class RagExample {
                 .variables(Map.of(SEARCHED_POPE_PONTIFF_NUMBER_KEY, searchedPopePontiffNumber))
                 .build()
                 .create();
-        var pope = searchPope(prompt, chatClient, vectorStore, searchedPopePontiffNumber);
+        var chatClientRequestSpec = chatClient.prompt(prompt);
+        var pope = searchPope(chatClientRequestSpec, vectorStore, searchedPopePontiffNumber);
         LOGGER.info("The {} pope is: {}", searchedPopePontiffNumber, pope);
     }
 
     private void searchNextPopes(ChatClient chatClient, VectorStore vectorStore) {
         IntStream.range(searchedPopePontiffNumber + 1, searchedPopePontiffNumber + nextSearchedPopesNumber + 1).forEach(currentSearchedPopePontiffNumber -> {
-            var prompt = createUserPrompt();
-            var pope = searchPope(prompt, chatClient, vectorStore, currentSearchedPopePontiffNumber);
+            var chatClientRequestSpec = chatClient.prompt().user(userPromptResource);
+            var pope = searchPope(chatClientRequestSpec, vectorStore, currentSearchedPopePontiffNumber);
             LOGGER.info("The next pope is: {}", pope);
         });
     }
 
-    private Pope searchPope(Prompt prompt, ChatClient chatClient, VectorStore vectorStore, int searchedPopePontiffNumber) {
-        return chatClient.prompt(prompt)
-                .advisors(QuestionAnswerAdvisor.builder(vectorStore)
-                        .searchRequest(createSearchRequest(searchedPopePontiffNumber))
-                        .build())
+    private static Pope searchPope(ChatClient.ChatClientRequestSpec chatClientRequestSpec, VectorStore vectorStore, int searchedPopePontiffNumber) {
+        var questionAnswerAdvisor = QuestionAnswerAdvisor.builder(vectorStore)
+                .searchRequest(createSearchRequest(searchedPopePontiffNumber))
+                .build();
+
+        return chatClientRequestSpec.advisors(SessionAdvisors.session(SESSION_ID))
+                .advisors(questionAnswerAdvisor)
                 .call()
-                .entity(Pope.class, ChatClient.EntityParamSpec::validateSchema);
+                .entity(Pope.class, entityParamSpec -> entityParamSpec.useProviderStructuredOutput().validateSchema());
     }
 
     private static SearchRequest createSearchRequest(int searchedPopePontiffNumber) {
@@ -150,14 +159,6 @@ class RagExample {
         return SearchRequest.builder()
                 .filterExpression(filterExpression)
                 .build();
-    }
-
-    private Prompt createUserPrompt() {
-        try {
-            return new Prompt(userPromptResource.getContentAsString(Charset.defaultCharset()));
-        } catch (IOException exception) {
-            throw new IllegalStateException("Unable to read user prompt!", exception);
-        }
     }
 
     static void main(String[] args) {

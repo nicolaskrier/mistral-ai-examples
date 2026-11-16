@@ -16,6 +16,17 @@ class PopeSearchTools {
 
     private final List<Pope> popes = List.of(
             new Pope(
+                    263,
+                    LocalDate.of(1978, 8, 26),
+                    LocalDate.of(1978, 9, 28),
+                    LocalDate.of(1912, 10, 17),
+                    LocalDate.of(1978, 9, 28),
+                    "John Paul I",
+                    "IOANNES PAULUS Primus",
+                    "Albino Luciani",
+                    List.of("Italian")
+            ),
+            new Pope(
                     264,
                     LocalDate.of(1978, 10, 16),
                     LocalDate.of(2005, 4, 2),
