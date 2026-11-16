@@ -60,8 +60,8 @@ class RagExample {
     @Value("${searched-pope-pontiff-number:267}")
     private int searchedPopePontiffNumber;
 
-    @Value("${next-searched-popes-number:0}")
-    private int nextSearchedPopesNumber;
+    @Value("${previous-searched-popes-number:0}")
+    private int previousSearchedPopesNumber;
 
     @Bean
     DocumentReader documentReader() {
@@ -115,7 +115,7 @@ class RagExample {
     ApplicationRunner dataRetrieverApplicationRunner(ChatClient chatClient, VectorStore vectorStore) {
         return _ -> {
             searchPope(chatClient, vectorStore);
-            searchNextPopes(chatClient, vectorStore);
+            searchPreviousPopes(chatClient, vectorStore);
         };
     }
 
@@ -126,34 +126,36 @@ class RagExample {
                 .build()
                 .create();
         var chatClientRequestSpec = chatClient.prompt(prompt);
-        var pope = searchPope(chatClientRequestSpec, vectorStore, searchedPopePontiffNumber);
-        LOGGER.info("The {} pope is: {}", searchedPopePontiffNumber, pope);
+        searchPope(chatClientRequestSpec, vectorStore, searchedPopePontiffNumber);
     }
 
-    private void searchNextPopes(ChatClient chatClient, VectorStore vectorStore) {
-        IntStream.range(searchedPopePontiffNumber + 1, searchedPopePontiffNumber + nextSearchedPopesNumber + 1).forEach(currentSearchedPopePontiffNumber -> {
-            var chatClientRequestSpec = chatClient.prompt().user(userPromptResource);
-            var pope = searchPope(chatClientRequestSpec, vectorStore, currentSearchedPopePontiffNumber);
-            LOGGER.info("The next pope is: {}", pope);
-        });
+    private void searchPreviousPopes(ChatClient chatClient, VectorStore vectorStore) {
+        IntStream.iterate(searchedPopePontiffNumber - 1, pontiffNumber -> pontiffNumber - 1)
+                .limit(previousSearchedPopesNumber)
+                .forEach(pontiffNumber -> searchPope(chatClient, vectorStore, pontiffNumber));
     }
 
-    private static Pope searchPope(ChatClient.ChatClientRequestSpec chatClientRequestSpec, VectorStore vectorStore, int searchedPopePontiffNumber) {
+    private void searchPope(ChatClient chatClient, VectorStore vectorStore, int pontiffNumber) {
+        var chatClientRequestSpec = chatClient.prompt().user(userPromptResource);
+        searchPope(chatClientRequestSpec, vectorStore, pontiffNumber);
+    }
+
+    private static void searchPope(ChatClient.ChatClientRequestSpec chatClientRequestSpec, VectorStore vectorStore, int pontiffNumber) {
         var questionAnswerAdvisor = QuestionAnswerAdvisor.builder(vectorStore)
-                .searchRequest(createSearchRequest(searchedPopePontiffNumber))
+                .searchRequest(createSearchRequest(pontiffNumber))
                 .build();
-
-        return chatClientRequestSpec.advisors(SessionAdvisors.session(SESSION_ID))
+        var pope = chatClientRequestSpec.advisors(SessionAdvisors.session(SESSION_ID))
                 .advisors(questionAnswerAdvisor)
                 .call()
                 .entity(Pope.class, entityParamSpec -> entityParamSpec.useProviderStructuredOutput().validateSchema());
+        LOGGER.info("The pope #{} is: {}", pontiffNumber, pope);
     }
 
-    private static SearchRequest createSearchRequest(int searchedPopePontiffNumber) {
+    private static SearchRequest createSearchRequest(int pontiffNumber) {
         var filterExpression = new Filter.Expression(
                 Filter.ExpressionType.EQ,
                 new Filter.Key(PONTIFF_NUMBER_KEY),
-                new Filter.Value(searchedPopePontiffNumber)
+                new Filter.Value(pontiffNumber)
         );
 
         return SearchRequest.builder()

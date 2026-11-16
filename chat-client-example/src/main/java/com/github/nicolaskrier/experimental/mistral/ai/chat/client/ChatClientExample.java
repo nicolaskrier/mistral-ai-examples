@@ -41,8 +41,8 @@ class ChatClientExample {
     @Value("${searched-pope:current}")
     private String searchedPope;
 
-    @Value("${next-searched-popes-number:0}")
-    private int nextSearchedPopesNumber;
+    @Value("${previous-searched-popes-number:0}")
+    private int previousSearchedPopesNumber;
 
     @Bean
     ChatClient chatClient(ChatClient.Builder chatClientBuilder, SessionService sessionService) {
@@ -60,7 +60,7 @@ class ChatClientExample {
     ApplicationRunner applicationRunner(ChatClient chatClient) {
         return _ -> {
             searchPope(chatClient);
-            searchNextPopes(chatClient);
+            searchPreviousPopes(chatClient);
         };
     }
 
@@ -75,11 +75,11 @@ class ChatClientExample {
         LOGGER.info("The {} pope is: {}", searchedPope, pope);
     }
 
-    private void searchNextPopes(ChatClient chatClient) {
-        IntStream.range(0, nextSearchedPopesNumber).forEach(_ -> {
+    private void searchPreviousPopes(ChatClient chatClient) {
+        IntStream.range(0, previousSearchedPopesNumber).forEach(_ -> {
             var chatClientRequestSpec = chatClient.prompt().user(userPromptResource);
             var pope = searchPope(chatClientRequestSpec);
-            LOGGER.info("The next pope is: {}", pope);
+            LOGGER.info("The previous pope is: {}", pope);
         });
     }
 

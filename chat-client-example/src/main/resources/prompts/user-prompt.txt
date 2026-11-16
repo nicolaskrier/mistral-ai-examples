@@ -1,2 +1,2 @@
-Who is the following pope based on the pontiff number?
-The pontiff number must be incremented by one only.
+Who is the previous pope based on the pontiff number?
+The pontiff number must be decremented by one only.
